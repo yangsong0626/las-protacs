@@ -1,0 +1,13 @@
+{
+ "raw": 165241890,
+ "attachment": 105765932,
+ "attachment_exact": true,
+ "sample": 20000,
+ "sample_clean": 18058,
+ "clean_rate": 0.9029,
+ "clean_ci": [
+  0.8987186385284861,
+  0.9069266131315751
+ ],
+ "clean_estimate": 95496060
+}

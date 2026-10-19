@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "las-protacs"
+version = "0.1.0"
+description = "Decompose, recombine and triage PROTACs from public component data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["rdkit>=2023.3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

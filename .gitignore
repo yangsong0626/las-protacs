@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.venv/
+.testvendor/
+
+# Raw structure sets are not redistributed here — fetch them from the source
+# cited in the README and regenerate with scripts/prepare_protac8k.py.
+data/protac8k/
+data/protacdb/
+
+# Per-degrader decomposition table: ~2 MB, and reproducible in ~20 s from the
+# corpus.  data/components.json *is* committed, so the funnel and the demo can
+# be rebuilt without downloading the structure set.
+data/decomposed.json

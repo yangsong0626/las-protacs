@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Las Protacs — PROTAC recombination, filtered</title>
+<meta name="description" content="Las Protacs: spin a warhead, a linker and an E3 ligand into a degrader — then see whether the chemistry survives.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0f1116; --panel:#171a21; --rail:#232833; --edge:#2e3440;
+    --paper:#f6f4ef; --paper-ink:#1b1f27; --muted:#8b93a3;
+    --warhead:#4d8df6; --linker:#e0922f; --e3:#9b7bd4;
+    --pass:#3fb783; --fail:#e0565b;
+    --ui:"Space Grotesk",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--ink); color:#dfe4ec; font-family:var(--ui);
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:62rem;margin:0 auto;padding:1.5rem 1.1rem 4rem}
+
+  header{display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;justify-content:space-between;
+    padding-bottom:1rem;border-bottom:1px solid var(--edge);margin-bottom:1.6rem}
+  h1{font-size:clamp(1.5rem,3.6vw,2.1rem);font-weight:700;letter-spacing:-.02em;margin:0}
+  h1 span{color:var(--muted);font-weight:400;display:block;font-size:.8rem;letter-spacing:.02em;margin-top:.3rem}
+  .funnel{font-family:var(--mono);font-size:.72rem;color:var(--muted);text-align:right;line-height:1.7}
+  .funnel b{color:#dfe4ec;font-weight:500}
+
+  /* ---- provenance strip ---- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:1px;
+    background:var(--edge);border:1px solid var(--edge);border-radius:10px;overflow:hidden;margin-bottom:1.1rem}
+  .stat{background:var(--panel);padding:.62rem .8rem}
+  .stat .n{font-family:var(--mono);font-size:1.02rem;font-weight:500;color:#dfe4ec;letter-spacing:-.01em}
+  .stat .l{font-size:.68rem;color:var(--muted);margin-top:.12rem;line-height:1.35}
+  .stat em{font-style:normal;color:var(--pass);font-weight:600}
+
+  /* ---- reels ---- */
+  .machine{background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:1.1rem;
+    box-shadow:0 1px 0 #333a48 inset,0 18px 40px -28px #000}
+  .reels{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem}
+  .reel{background:var(--rail);border:1px solid var(--edge);border-radius:10px;overflow:hidden;position:relative;
+    cursor:pointer;min-height:7.6rem}
+  .reel:focus-visible{outline:2px solid var(--warhead);outline-offset:2px}
+  .reel-head{display:flex;justify-content:space-between;align-items:center;gap:.4rem;
+    padding:.42rem .6rem;font-family:var(--mono);font-size:.63rem;letter-spacing:.09em;text-transform:uppercase;
+    border-bottom:1px solid var(--edge);color:var(--muted)}
+  .reel[data-slot="0"] .reel-head{color:var(--warhead)}
+  .reel[data-slot="1"] .reel-head{color:var(--linker)}
+  .reel[data-slot="2"] .reel-head{color:var(--e3)}
+  .hold{font-size:.6rem;letter-spacing:.08em;padding:.1rem .34rem;border-radius:4px;border:1px solid currentColor;opacity:.35}
+  .reel.held .hold{opacity:1;background:currentColor;color:var(--rail)}
+  .reel.held{border-color:currentColor}
+  .window{height:5.4rem;display:flex;align-items:center;justify-content:center;padding:.3rem .55rem;text-align:center}
+  .window .name{font-weight:500;font-size:.95rem;line-height:1.25}
+  .window .tag{font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.22rem}
+  .spinning .window{animation:blur .42s linear infinite}
+  @keyframes blur{0%{opacity:.25;transform:translateY(-14px)}50%{opacity:1}100%{opacity:.25;transform:translateY(14px)}}
+  @media (prefers-reduced-motion:reduce){.spinning .window{animation:none;opacity:.5}}
+
+  .controls{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.9rem;align-items:center}
+  button{font-family:var(--ui);font-size:.84rem;font-weight:500;border-radius:8px;cursor:pointer;
+    padding:.6rem 1.15rem;border:1px solid var(--edge);background:var(--rail);color:#dfe4ec;transition:background .12s}
+  button:hover{background:#2b313d}
+  button:focus-visible{outline:2px solid var(--warhead);outline-offset:2px}
+  button.primary{background:#dfe4ec;color:#11141a;border-color:#dfe4ec;font-weight:700;letter-spacing:.02em}
+  button.primary:hover{background:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .hint{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-left:auto}
+
+  /* ---- readout ---- */
+  .readout{margin-top:1.1rem;background:var(--paper);color:var(--paper-ink);border-radius:12px;overflow:hidden}
+  .verdict{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;padding:.7rem .95rem;
+    font-family:var(--mono);font-size:.74rem;border-bottom:1px solid #e2ded5}
+  .chip{font-weight:500;padding:.2rem .55rem;border-radius:5px;color:#fff;letter-spacing:.04em}
+  .chip.pass{background:var(--pass)} .chip.fail{background:var(--fail)}
+  .reason{color:#6b6257}
+  svg.struct{display:block;width:100%;height:auto;background:var(--paper)}
+  .empty{padding:3.2rem 1rem;text-align:center;color:#9a9286;font-family:var(--mono);font-size:.78rem}
+
+  .props{display:grid;grid-template-columns:repeat(auto-fit,minmax(8.2rem,1fr));gap:.1rem;
+    border-top:1px solid #e2ded5;background:#e2ded5}
+  .prop{background:var(--paper);padding:.6rem .8rem}
+  .prop .k{font-family:var(--mono);font-size:.62rem;letter-spacing:.07em;text-transform:uppercase;color:#8a8275}
+  .prop .v{font-size:1.02rem;font-weight:500;margin-top:.1rem}
+  .bar{height:3px;border-radius:2px;background:#ddd8cd;margin-top:.4rem;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--pass)}
+  .bar i.out{background:var(--linker)}
+
+  .legend{display:flex;flex-wrap:wrap;gap:.3rem 1.1rem;font-family:var(--mono);font-size:.68rem;
+    color:var(--muted);margin-top:.9rem}
+  .legend b{font-weight:500}
+  .sw{display:inline-block;width:.62rem;height:.62rem;border-radius:2px;vertical-align:-1px;margin-right:.3rem}
+
+  footer{margin-top:2.2rem;padding-top:1.1rem;border-top:1px solid var(--edge);
+    font-size:.78rem;color:var(--muted)}
+  footer a{color:#aab3c4}
+  @media (max-width:560px){
+    .reels{grid-template-columns:1fr}
+    .reel{min-height:0}
+    .window{height:3.6rem}
+    .funnel{text-align:left}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Las Protacs
+      <span>Spin a warhead, a linker and an E3 ligand. See whether the chemistry survives.</span>
+    </h1>
+    <div class="funnel" id="funnel"></div>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="machine">
+    <div class="reels" id="reels">
+      <div class="reel" data-slot="0" tabindex="0" role="button" aria-label="Warhead reel, click to hold">
+        <div class="reel-head"><span>Warhead</span><span class="hold">HOLD</span></div>
+        <div class="window"><div><div class="name">—</div><div class="tag"></div></div></div>
+      </div>
+      <div class="reel" data-slot="1" tabindex="0" role="button" aria-label="Linker reel, click to hold">
+        <div class="reel-head"><span>Linker</span><span class="hold">HOLD</span></div>
+        <div class="window"><div><div class="name">—</div><div class="tag"></div></div></div>
+      </div>
+      <div class="reel" data-slot="2" tabindex="0" role="button" aria-label="E3 ligand reel, click to hold">
+        <div class="reel-head"><span>E3 ligand</span><span class="hold">HOLD</span></div>
+        <div class="window"><div><div class="name">—</div><div class="tag"></div></div></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="primary" id="spin">SPIN</button>
+      <button id="best">Best scoring</button>
+      <button id="worst">Show me a reject</button>
+      <span class="hint">click a reel to hold it</span>
+    </div>
+
+    <div class="legend">
+      <span><i class="sw" style="background:var(--warhead)"></i><b>warhead</b></span>
+      <span><i class="sw" style="background:var(--linker)"></i><b>linker</b></span>
+      <span><i class="sw" style="background:var(--e3)"></i><b>E3 ligand</b></span>
+    </div>
+  </div>
+
+  <div class="readout">
+    <div class="verdict" id="verdict"><span class="reason">Press SPIN to assemble a degrader.</span></div>
+    <div id="canvas"><div class="empty">no molecule yet</div></div>
+    <div class="props" id="props"></div>
+  </div>
+
+  <footer id="footer">
+    Every component on these reels was cut out of a real degrader: the library is
+    decomposed from the <a href="https://doi.org/10.5281/zenodo.7278277">PROTAC-8K</a>
+    structure set, and the reel shows the most frequently used pieces.
+    Decomposition, assembly, attachment rules and properties all run in
+    <a href="https://www.rdkit.org/">RDKit</a>. Warhead names were assigned by hand
+    from structure and are not part of the dataset.
+    <a href="https://github.com/yangsong0626/las-protacs">Source and method</a>.
+  </footer>
+</div>
+
+<!-- RDKit is vendored rather than pulled from a CDN: the demo has to draw a
+     molecule on a locked-down network, and a blocked CDN would leave the page
+     working but silently empty. vendor/ is RDKit_minimal 2026.3.6, unmodified. -->
+<script src="vendor/RDKit_minimal.js"></script>
+<script>
+const BANDS = { mw:[700,1100], clogp:[2,6.5], tpsa:[90,180], rotb:[6,20] };
+let DATA = null, RDKit = null;
+let pick = [0,0,0];
+const held = [false,false,false];
+
+const $ = id => document.getElementById(id);
+const reels = () => [...document.querySelectorAll('.reel')];
+
+function fmtInt(n){ return n.toLocaleString('en-US'); }
+
+function sci(n){
+  const e = Math.floor(Math.log10(n));
+  return `${(n / 10 ** e).toFixed(2)}×10<sup>${e}</sup>`;
+}
+
+function renderFunnel(){
+  const f = DATA.funnel;
+  $('funnel').innerHTML =
+    `<div><b>${fmtInt(f.raw)}</b> combinations on this reel</div>` +
+    `<div><b>${fmtInt(f.attachment)}</b> survive attachment chemistry</div>` +
+    `<div><b>${fmtInt(f.raw - f.attachment)}</b> blocked before assembly</div>`;
+}
+
+/* The reel is the head of a much larger library.  These are the numbers that
+   matter, and they are measured, not asserted: the attachment count is exact
+   (the rule factorises over element pairs, so it is a sum, not a search). */
+function renderStats(){
+  const L = DATA.library, F = DATA.full_funnel || {};
+  const cells = [
+    [fmtInt(L.degraders), `reported degraders decomposed, <em>0</em> round-trip errors`],
+    [`${fmtInt(L.warheads)} · ${fmtInt(L.linkers)} · ${fmtInt(L.e3s)}`,
+     'unique warheads · linkers · E3 ligands recovered'],
+    [sci(L.space), 'formal combinations they span'],
+  ];
+  if(F.attachment){
+    const blocked = 100 * (1 - F.attachment / F.raw);
+    cells.push([`${blocked.toFixed(0)}%`,
+      'of that space is invalid chemistry — counted exactly, nothing enumerated']);
+  }
+  $('stats').innerHTML = cells.map(([n, l]) =>
+    `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+}
+
+function setReel(slot, idx){
+  const lists = [DATA.warheads, DATA.linkers, DATA.e3s];
+  const item = lists[slot][idx];
+  const r = reels()[slot];
+  r.querySelector('.name').textContent = item.name;
+  const seen = item.n ? ` · in ${item.n} degrader${item.n === 1 ? '' : 's'}` : '';
+  r.querySelector('.tag').textContent = item.tag + seen;
+}
+
+function comboKey(p){ return `${p[0]}-${p[1]}-${p[2]}`; }
+
+function currentCombo(){ return DATA.combos[comboKey(pick)] || null; }
+
+/* Highlight atoms belonging to each component, so the drawing reads as
+   warhead | linker | E3 rather than one undifferentiated blob. */
+function highlightsFor(smiles){
+  const lists = [DATA.warheads, DATA.linkers, DATA.e3s];
+  const colors = [[0.30,0.55,0.96],[0.88,0.57,0.18],[0.61,0.48,0.83]];
+  const atoms = {}, bonds = {};
+  let mol;
+  try { mol = RDKit.get_mol(smiles); } catch(e){ return null; }
+  if(!mol) return null;
+  lists.forEach((list, slot) => {
+    const frag = list[pick[slot]].smiles.replace(/\[\*:\d\]/g, '[#0,#1,*]');
+    let q = null;
+    try { q = RDKit.get_qmol(frag); } catch(e){ q = null; }
+    if(!q) return;
+    let res;
+    try { res = JSON.parse(mol.get_substruct_match(q)); } catch(e){ res = null; }
+    q.delete();
+    if(!res || !res.atoms) return;
+    res.atoms.forEach(a => { if(!(a in atoms)) atoms[a] = colors[slot]; });
+    (res.bonds||[]).forEach(b => { if(!(b in bonds)) bonds[b] = colors[slot]; });
+  });
+  mol.delete();
+  return { atoms, bonds };
+}
+
+function drawMolecule(smiles){
+  const box = $('canvas');
+  if(!RDKit){ box.innerHTML = '<div class="empty">loading chemistry engine…</div>'; return; }
+  let mol;
+  try { mol = RDKit.get_mol(smiles); } catch(e){ mol = null; }
+  if(!mol){ box.innerHTML = '<div class="empty">could not render</div>'; return; }
+
+  const hl = highlightsFor(smiles) || {atoms:{},bonds:{}};
+  const w = Math.min(920, Math.max(320, box.clientWidth || 720));
+  const details = {
+    width:w, height:Math.round(w*0.42), bondLineWidth:1.1, addStereoAnnotation:false,
+    backgroundColour:[0.965,0.957,0.937,1],
+    highlightColour:[0.85,0.85,0.85],
+    atoms:Object.keys(hl.atoms).map(Number),
+    bonds:Object.keys(hl.bonds).map(Number),
+    highlightAtomColors:hl.atoms, highlightBondColors:hl.bonds
+  };
+  let svg;
+  try { svg = mol.get_svg_with_highlights(JSON.stringify(details)); }
+  catch(e){ svg = mol.get_svg(w, Math.round(w*0.42)); }
+  mol.delete();
+  box.innerHTML = svg;
+  const el = box.querySelector('svg');
+  if(el){ el.classList.add('struct'); el.removeAttribute('width'); el.removeAttribute('height'); }
+}
+
+function propCell(label, value, key, unit){
+  let pct = 100, out = false;
+  if(key && BANDS[key]){
+    const [lo,hi] = BANDS[key];
+    out = value < lo || value > hi;
+    pct = Math.max(6, Math.min(100, ((value - lo) / (hi - lo)) * 100));
+    if(value < lo) pct = 6;
+    if(value > hi) pct = 100;
+  }
+  return `<div class="prop"><div class="k">${label}</div>
+    <div class="v">${value}${unit||''}</div>
+    <div class="bar"><i class="${out?'out':''}" style="width:${pct}%"></i></div></div>`;
+}
+
+function renderCombo(){
+  const c = currentCombo();
+  const v = $('verdict');
+  if(!c){
+    const why = (DATA.rejects || {})[comboKey(pick)] ||
+      'it would form a bond between two heteroatoms';
+    v.innerHTML = '<span class="chip fail">BLOCKED BEFORE ASSEMBLY</span>' +
+      `<span class="reason">${why}. No chemist would make this bond, so the ` +
+      'molecule is never built and never scored.</span>';
+    $('canvas').innerHTML = '<div class="empty">nothing to draw — the join was rejected</div>';
+    $('props').innerHTML = '';
+    return;
+  }
+  const ok = c.alerts.length === 0;
+  const reason = ok
+    ? (c.flags.length ? c.flags.join(' · ') : 'inside the usual property bands for cell-active degraders')
+    : 'new liability created by the join: ' + c.alerts.join(', ');
+  v.innerHTML =
+    `<span class="chip ${ok?'pass':'fail'}">${ok?'CHEMISTRY OK':'REJECTED'}</span>` +
+    `<span class="reason">${reason}</span>` +
+    `<span class="reason" style="margin-left:auto">score ${c.dev.toFixed(2)}</span>`;
+  drawMolecule(c.smiles);
+  $('props').innerHTML =
+    propCell('MW', c.mw, 'mw') +
+    propCell('cLogP', c.clogp, 'clogp') +
+    propCell('TPSA', c.tpsa, 'tpsa', ' Å²') +
+    propCell('Rot. bonds', c.rotb, 'rotb') +
+    propCell('HBD', c.hbd, null);
+}
+
+function randomIdx(slot){
+  const lists = [DATA.warheads, DATA.linkers, DATA.e3s];
+  return Math.floor(Math.random() * lists[slot].length);
+}
+
+let spinning = false;
+function spin(target){
+  if(spinning || !DATA) return;
+  spinning = true;
+  $('spin').disabled = true;
+  const rs = reels();
+  // A held reel keeps its value on a normal spin, but "Best scoring" and
+  // "Show me a reject" jump to an exact combination and override the holds.
+  const slots = [0,1,2].filter(s => target || !held[s]);
+  if(slots.length === 0){ spinning = false; $('spin').disabled = false; return; }
+
+  const landed = new Set();
+  slots.forEach(s => rs[s].classList.add('spinning'));
+
+  const tick = setInterval(() => {
+    slots.forEach(s => { if(!landed.has(s)) setReel(s, randomIdx(s)); });
+  }, 70);
+
+  let remaining = slots.length;
+  slots.forEach((s, i) => {
+    setTimeout(() => {
+      pick[s] = target ? target[s] : randomIdx(s);
+      landed.add(s);                 // stop the interval touching this reel
+      setReel(s, pick[s]);
+      rs[s].classList.remove('spinning');
+      if(--remaining === 0){
+        clearInterval(tick);
+        spinning = false;
+        $('spin').disabled = false;
+        renderCombo();
+      }
+    }, 420 + i * 300);
+  });
+}
+
+/* Many combinations tie at the top of the property score, so pick among the
+   ties rather than always showing whichever one sorts first. */
+function best(){
+  let top = [], bv = -1;
+  for(const [k, c] of Object.entries(DATA.combos)){
+    const v = (c.alerts.length === 0 ? 1000 : 0) + c.dev;
+    if(v > bv + 1e-9){ bv = v; top = [k]; }
+    else if(Math.abs(v - bv) < 1e-9){ top.push(k); }
+  }
+  if(top.length) spin(top[Math.floor(Math.random() * top.length)].split('-').map(Number));
+}
+
+/* A reject is either a bond that was refused before assembly, or a molecule
+   that assembled and then introduced a liability.  Show the refused bonds
+   first: they are the ones a naive enumeration would have shipped. */
+function reject(){
+  const blocked = Object.keys(DATA.rejects || {});
+  if(blocked.length){
+    const k = blocked[Math.floor(Math.random() * blocked.length)];
+    spin(k.split('-').map(Number));
+    return;
+  }
+  let bk = null, bv = null;
+  for(const [k, c] of Object.entries(DATA.combos)){
+    if(c.alerts.length && (bv === null || c.dev < bv)){ bv = c.dev; bk = k; }
+  }
+  if(bk) spin(bk.split('-').map(Number));
+}
+
+function bindReels(){
+  reels().forEach((r, i) => {
+    const toggle = () => { held[i] = !held[i]; r.classList.toggle('held', held[i]); };
+    r.addEventListener('click', toggle);
+    r.addEventListener('keydown', e => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); toggle(); }
+    });
+  });
+}
+
+async function boot(){
+  const res = await fetch('reel.json');
+  DATA = await res.json();
+  renderFunnel();
+  renderStats();
+  bindReels();
+  [0,1,2].forEach(s => setReel(s, 0));
+  $('spin').addEventListener('click', () => spin(null));
+  $('best').addEventListener('click', best);
+  $('worst').addEventListener('click', reject);
+
+  if(window.initRDKitModule){
+    RDKit = await window.initRDKitModule();
+  }
+  // First impression should be a molecule, not a rejection: start on a
+  // combination that assembled.  Random spins can still land on a blocked
+  // pairing — that is the point of the demo.
+  const keys = Object.keys(DATA.combos);
+  const start = keys[Math.floor(Math.random() * keys.length)].split('-').map(Number);
+  spin(start);
+}
+boot();
+</script>
+</body>
+</html>

@@ -9,12 +9,13 @@ formally spell out, a third are bonds no chemist would make.
 
 **[Try it →](https://yangsong0626.github.io/las-protacs/)**
 
-![Las Protacs: spinning a warhead, linker and E3 ligand into a degrader, and a
-pairing refused before assembly](docs/demo.gif)
+![Las Protacs: spinning a warhead, linker and E3 ligand into a degrader, then a
+refused pairing and the one-atom change that rescues it](docs/demo.gif)
 
-*Three spins. The middle one is refused before anything is built: joining that
-linker to that E3 ligand would make a hydroxylamine, so no molecule is drawn
-and nothing is scored.*
+*Two spins, then a refusal. Joining that linker to that E3 ligand would make a
+hydrazine — so the tool says which atom to move instead of just saying no:
+mutate the linker's attachment nitrogen to carbon and the same three pieces
+give a legal degrader.*
 
 A PROTAC is three pieces bolted together, which makes it look like a
 combinatorics problem. Decompose every degrader in a public structure set and
@@ -140,6 +141,26 @@ the demo prints it verbatim rather than saying "invalid".
 that its pieces did not. This distinction matters: a warhead that already
 contains a sulfonamide or a cyclic acetal is the medicinal chemist's business.
 Flagging it would be the tool second-guessing a published molecule.
+
+### Repair: a refusal that says which atom to move
+
+A filter that only says no is half a tool. `repair_attachment` takes a refused
+combination and mutates the offending **linker** atom to carbon, which is
+almost always enough: the piperazine whose ring nitrogen would have made a
+hydrazine becomes a piperidine, and the same three pieces give a legal
+degrader. On the demo reel **all 364 refused joins are one atom from a valid
+design**, and the demo draws the repaired molecule instead of an error.
+
+The repair never touches the warhead or the E3 ligand, and that restriction is
+the whole point. Those are published compounds whose exit vectors are part of
+the recognised pharmacophore — move the tert-leucine nitrogen on a VHL ligand
+and you are no longer holding a VHL ligand. The linker exists to be designed,
+so the linker is what changes. A test asserts both ligands survive the edit
+intact.
+
+Repairs that cannot be made cleanly are declined rather than forced: mutating
+the nitrogen out of a pyrrole leaves a ring that will not sanitise, and a
+proposal a chemist would laugh at is worse than no proposal.
 
 ### Scoring
 

@@ -147,3 +147,95 @@ def new_alerts(product, pieces) -> list[str]:
         for k, v in _alert_counts(p).items():
             before[k] = before.get(k, 0) + v
     return sorted(k for k, v in prod.items() if v > before.get(k, 0))
+
+
+# --------------------------------------------------------------------------
+# Repair
+# --------------------------------------------------------------------------
+# Refusing a combination is only half an answer. A refused join is usually one
+# atom away from a legal one, and saying which atom is the part a chemist can
+# act on.
+
+
+def _mutate_attachment_to_carbon(linker: str, label: int) -> tuple[str, str] | None:
+    """Turn the linker atom carrying ``[*:label]`` into carbon.
+
+    Returns ``(new_linker_smiles, what_changed)``, or None if the atom is
+    already carbon or the edit does not survive sanitisation — mutating the
+    nitrogen out of a pyrrole, for instance, leaves a ring that cannot be
+    kekulised, and that is a repair not worth proposing.
+    """
+    mol = Chem.MolFromSmiles(linker)
+    if mol is None:
+        return None
+    rw = Chem.RWMol(mol)
+
+    idx = None
+    for atom in rw.GetAtoms():
+        if atom.GetAtomicNum() == 0 and atom.GetAtomMapNum() == label:
+            nbrs = atom.GetNeighbors()
+            if nbrs:
+                idx = nbrs[0].GetIdx()
+            break
+    if idx is None:
+        return None
+
+    target = rw.GetAtomWithIdx(idx)
+    was = SYMBOL.get(target.GetAtomicNum(), "?")
+    if target.GetAtomicNum() == 6:
+        return None
+
+    target.SetAtomicNum(6)
+    target.SetFormalCharge(0)
+    target.SetNoImplicit(False)
+    target.SetNumExplicitHs(0)
+    try:
+        out = rw.GetMol()
+        Chem.SanitizeMol(out)
+    except Exception:
+        return None
+    smi = Chem.MolToSmiles(out)
+    if Chem.MolFromSmiles(smi) is None:
+        return None
+    return smi, f"{was}→C"
+
+
+def repair_attachment(warhead: str, linker: str, e3: str) -> dict | None:
+    """Make a refused join legal by mutating the offending linker atom to carbon.
+
+    The repair always edits the **linker**, never the two ligands. A warhead
+    and an E3 ligand are published compounds whose exit vectors are part of the
+    recognised pharmacophore — move that nitrogen and you are no longer holding
+    the ligand you started with. The linker is the piece that exists to be
+    designed, so that is where the change belongs.
+
+    Returns ``{"linker", "changed", "ends"}`` describing the new linker, or
+    None if nothing needed fixing or no clean repair exists.
+    """
+    wh = attachment_atoms(warhead)
+    lk = attachment_atoms(linker)
+    e3a = attachment_atoms(e3)
+    if 1 not in wh or 2 not in e3a or 1 not in lk or 2 not in lk:
+        return None
+
+    needed = []
+    if not bond_ok(wh[1], lk[1]):
+        needed.append((1, "warhead"))
+    if not bond_ok(e3a[2], lk[2]):
+        needed.append((2, "E3"))
+    if not needed:
+        return None
+
+    current = linker
+    changes = []
+    for label, side in needed:
+        got = _mutate_attachment_to_carbon(current, label)
+        if got is None:
+            return None
+        current, what = got
+        changes.append(f"{what} at the {side} end")
+
+    if not attachment_ok(warhead, current, e3):
+        return None
+    return {"linker": current, "changed": "; ".join(changes),
+            "ends": [label for label, _ in needed]}

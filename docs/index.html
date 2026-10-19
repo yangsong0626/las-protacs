@@ -82,6 +82,27 @@
   svg.struct{display:block;width:100%;height:auto;background:var(--paper)}
   .empty{padding:3.2rem 1rem;text-align:center;color:#9a9286;font-family:var(--mono);font-size:.78rem}
 
+  /* ---- the three pieces, drawn ---- */
+  .components{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e2ded5;
+    border-bottom:1px solid #e2ded5}
+  .piece{background:var(--paper);padding:.5rem .6rem .2rem;min-width:0}
+  .piece .lab{font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;
+    display:flex;align-items:center;gap:.34rem;color:#8a8275}
+  .piece .lab i{width:.56rem;height:.56rem;border-radius:2px;flex:none}
+  .piece .nm{font-size:.76rem;font-weight:500;margin:.1rem 0 .05rem;line-height:1.25;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .piece svg{display:block;width:100%;height:auto}
+  .piece.changed{background:#fdf6e7}
+  .piece .was{font-family:var(--mono);font-size:.58rem;color:var(--linker)}
+
+  /* ---- the repair ---- */
+  .fix{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;padding:.6rem .95rem;
+    font-family:var(--mono);font-size:.74rem;background:#eef7f1;border-bottom:1px solid #d8e6dd}
+  .fix .chip{background:var(--pass)}
+  .fix .reason{color:#3c5a4a}
+  /* An author display rule beats the UA stylesheet's [hidden], so say it here. */
+  .fix[hidden]{display:none}
+
   .props{display:grid;grid-template-columns:repeat(auto-fit,minmax(8.2rem,1fr));gap:.1rem;
     border-top:1px solid #e2ded5;background:#e2ded5}
   .prop{background:var(--paper);padding:.6rem .8rem}
@@ -150,7 +171,9 @@
   </div>
 
   <div class="readout">
+    <div class="components" id="components"></div>
     <div class="verdict" id="verdict"><span class="reason">Press SPIN to assemble a degrader.</span></div>
+    <div class="fix" id="fix" hidden></div>
     <div id="canvas"><div class="empty">no molecule yet</div></div>
     <div class="props" id="props"></div>
   </div>
@@ -229,15 +252,29 @@ function currentCombo(){ return DATA.combos[comboKey(pick)] || null; }
 
 /* Highlight atoms belonging to each component, so the drawing reads as
    warhead | linker | E3 rather than one undifferentiated blob. */
-function highlightsFor(smiles){
-  const lists = [DATA.warheads, DATA.linkers, DATA.e3s];
-  const colors = [[0.30,0.55,0.96],[0.88,0.57,0.18],[0.61,0.48,0.83]];
+const PIECE_RGB = [[0.30,0.55,0.96],[0.88,0.57,0.18],[0.61,0.48,0.83]];
+
+/* The SMILES of the three pieces currently in play.  Normally these are the
+   reel's own components, but a repaired combination substitutes a modified
+   linker, and the drawing has to be coloured against the pieces that actually
+   went into it. */
+function pieceSmiles(linkerOverride){
+  return [
+    DATA.warheads[pick[0]].smiles,
+    linkerOverride || DATA.linkers[pick[1]].smiles,
+    DATA.e3s[pick[2]].smiles,
+  ];
+}
+
+function highlightsFor(smiles, linkerOverride){
+  const pieces = pieceSmiles(linkerOverride);
+  const colors = PIECE_RGB;
   const atoms = {}, bonds = {};
   let mol;
   try { mol = RDKit.get_mol(smiles); } catch(e){ return null; }
   if(!mol) return null;
-  lists.forEach((list, slot) => {
-    const frag = list[pick[slot]].smiles.replace(/\[\*:\d\]/g, '[#0,#1,*]');
+  pieces.forEach((piece, slot) => {
+    const frag = piece.replace(/\[\*:\d\]/g, '[#0,#1,*]');
     let q = null;
     try { q = RDKit.get_qmol(frag); } catch(e){ q = null; }
     if(!q) return;
@@ -252,14 +289,14 @@ function highlightsFor(smiles){
   return { atoms, bonds };
 }
 
-function drawMolecule(smiles){
+function drawMolecule(smiles, linkerOverride){
   const box = $('canvas');
   if(!RDKit){ box.innerHTML = '<div class="empty">loading chemistry engine…</div>'; return; }
   let mol;
   try { mol = RDKit.get_mol(smiles); } catch(e){ mol = null; }
   if(!mol){ box.innerHTML = '<div class="empty">could not render</div>'; return; }
 
-  const hl = highlightsFor(smiles) || {atoms:{},bonds:{}};
+  const hl = highlightsFor(smiles, linkerOverride) || {atoms:{},bonds:{}};
   const w = Math.min(920, Math.max(320, box.clientWidth || 720));
   const details = {
     width:w, height:Math.round(w*0.42), bondLineWidth:1.1, addStereoAnnotation:false,
@@ -292,19 +329,85 @@ function propCell(label, value, key, unit){
     <div class="bar"><i class="${out?'out':''}" style="width:${pct}%"></i></div></div>`;
 }
 
+/* Draw one component on its own, so the reels show structures and not just
+   names.  The [*] is left in: that asterisk is the attachment point, and
+   where it sits is the whole question. */
+function drawPiece(smiles, slot, box){
+  if(!RDKit) return '';
+  let mol;
+  try { mol = RDKit.get_mol(smiles); } catch(e){ return ''; }
+  if(!mol) return '';
+  const rgb = PIECE_RGB[slot];
+  const n = mol.get_num_atoms ? mol.get_num_atoms() : 0;
+  const details = {
+    width: box, height: Math.round(box * 0.62), bondLineWidth: 1,
+    addStereoAnnotation: false, backgroundColour: [0.965,0.957,0.937,1],
+    atoms: [...Array(n).keys()],
+    highlightAtomColors: Object.fromEntries([...Array(n).keys()].map(i => [i, rgb])),
+  };
+  let svg;
+  try { svg = mol.get_svg_with_highlights(JSON.stringify(details)); }
+  catch(e){ svg = mol.get_svg(box, Math.round(box * 0.62)); }
+  mol.delete();
+  return svg.replace(/width='[^']*'/, '').replace(/height='[^']*'/, '');
+}
+
+function renderComponents(linkerOverride, changed){
+  const names = ['Warhead', 'Linker', 'E3 ligand'];
+  const items = [DATA.warheads[pick[0]], DATA.linkers[pick[1]], DATA.e3s[pick[2]]];
+  const smis = pieceSmiles(linkerOverride);
+  const vars = ['--warhead', '--linker', '--e3'];
+  const box = Math.max(180, Math.round(($('components').clientWidth || 840) / 3) - 24);
+  $('components').innerHTML = items.map((it, i) => {
+    const swapped = i === 1 && linkerOverride;
+    const label = swapped ? `${it.name} <span class="was">${changed || 'modified'}</span>` : it.name;
+    return `<div class="piece${swapped ? ' changed' : ''}">
+      <div class="lab"><i style="background:var(${vars[i]})"></i>${names[i]}</div>
+      <div class="nm" title="${it.name}">${label}</div>
+      ${drawPiece(smis[i], i, box)}
+    </div>`;
+  }).join('');
+}
+
+function propRow(c){
+  return propCell('MW', c.mw, 'mw') + propCell('cLogP', c.clogp, 'clogp') +
+    propCell('TPSA', c.tpsa, 'tpsa', ' Å²') + propCell('Rot. bonds', c.rotb, 'rotb') +
+    propCell('HBD', c.hbd, null);
+}
+
 function renderCombo(){
   const c = currentCombo();
   const v = $('verdict');
+  const fixBox = $('fix');
   if(!c){
-    const why = (DATA.rejects || {})[comboKey(pick)] ||
-      'it would form a bond between two heteroatoms';
+    const rej = (DATA.rejects || {})[comboKey(pick)] || {};
+    const why = rej.reason || 'it would form a bond between two heteroatoms';
     v.innerHTML = '<span class="chip fail">BLOCKED BEFORE ASSEMBLY</span>' +
-      `<span class="reason">${why}. No chemist would make this bond, so the ` +
-      'molecule is never built and never scored.</span>';
-    $('canvas').innerHTML = '<div class="empty">nothing to draw — the join was rejected</div>';
-    $('props').innerHTML = '';
+      `<span class="reason">${why}. No chemist would make this bond, so this ` +
+      'pairing is never assembled and never scored.</span>';
+
+    // Refusing is half an answer.  The other half is which atom to move.
+    if(rej.fix){
+      const f = rej.fix;
+      fixBox.hidden = false;
+      fixBox.innerHTML = '<span class="chip pass">ONE ATOM AWAY</span>' +
+        `<span class="reason">Mutate the linker's attachment atom — ` +
+        `<b>${f.changed}</b> — and the same three pieces give a legal degrader. ` +
+        'Drawn below.</span>' +
+        `<span class="reason" style="margin-left:auto">score ${f.dev.toFixed(2)}</span>`;
+      renderComponents(f.linker, f.changed);
+      drawMolecule(f.smiles, f.linker);
+      $('props').innerHTML = propRow(f);
+    } else {
+      fixBox.hidden = true;
+      renderComponents();
+      $('canvas').innerHTML = '<div class="empty">nothing to draw — the join was rejected</div>';
+      $('props').innerHTML = '';
+    }
     return;
   }
+  fixBox.hidden = true;
+  renderComponents();
   const ok = c.alerts.length === 0;
   const reason = ok
     ? (c.flags.length ? c.flags.join(' · ') : 'inside the usual property bands for cell-active degraders')
@@ -314,12 +417,7 @@ function renderCombo(){
     `<span class="reason">${reason}</span>` +
     `<span class="reason" style="margin-left:auto">score ${c.dev.toFixed(2)}</span>`;
   drawMolecule(c.smiles);
-  $('props').innerHTML =
-    propCell('MW', c.mw, 'mw') +
-    propCell('cLogP', c.clogp, 'clogp') +
-    propCell('TPSA', c.tpsa, 'tpsa', ' Å²') +
-    propCell('Rot. bonds', c.rotb, 'rotb') +
-    propCell('HBD', c.hbd, null);
+  $('props').innerHTML = propRow(c);
 }
 
 function randomIdx(slot){

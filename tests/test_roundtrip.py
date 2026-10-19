@@ -10,7 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lasprotacs.assemble import assemble, same_molecule
 from lasprotacs.decompose import _scaffold_atoms, decompose
-from lasprotacs.rules import attachment_ok, attachment_reason, bond_ok, new_alerts
+from lasprotacs.rules import (
+    attachment_ok,
+    attachment_reason,
+    bond_ok,
+    new_alerts,
+    repair_attachment,
+)
 
 JQ1 = "CC1=C(C)C2=C(S1)N3C(C)=NN=C3[C@@H](CC(=O)N{R})N=C2C4=CC=C(Cl)C=C4"
 
@@ -163,3 +169,56 @@ def test_same_molecule_still_separates_genuine_stereoisomers():
     assert not same_molecule("C[C@H](N)C(=O)O", "C[C@@H](N)C(=O)O")
     assert same_molecule("C[C@H](N)C(=O)O", "C[C@H](N)C(=O)O")
     assert not same_molecule("CCO", "CCN")
+
+
+# ---------------------------------------------------------------------------
+# Repair: a refused join is usually one atom from a legal one.
+# ---------------------------------------------------------------------------
+
+VHL_LIGAND = (
+    "Cc1ncsc1-c1ccc(CNC(=O)[C@@H]2C[C@@H](O)CN2C(=O)[C@@H](N[*:2])C(C)(C)C)cc1"
+)
+PIPERAZINE = "O=C(CCN1CCN([*:2])CC1)N[*:1]"
+ANILIDE = "Nc1cc(F)ccc1NC(=O)c1ccc([*:1])cc1"
+
+
+def test_repair_turns_a_hydrazine_join_into_an_amine():
+    assert not attachment_ok(ANILIDE, PIPERAZINE, VHL_LIGAND)
+    fix = repair_attachment(ANILIDE, PIPERAZINE, VHL_LIGAND)
+    assert fix is not None
+    # Piperazine becomes a piperidine: the ring nitrogen at the exit vector is
+    # now carbon, so the bond formed is C-N rather than N-N.
+    assert attachment_ok(ANILIDE, fix["linker"], VHL_LIGAND)
+    assert attachment_reason(ANILIDE, fix["linker"], VHL_LIGAND) is None
+    product = assemble(ANILIDE, fix["linker"], VHL_LIGAND)
+    assert product is not None and Chem.MolFromSmiles(product) is not None
+
+
+def test_repair_edits_the_linker_and_never_the_ligands():
+    """The ligands' exit vectors are pharmacophore; only the linker is fair game."""
+    fix = repair_attachment(ANILIDE, PIPERAZINE, VHL_LIGAND)
+    product = assemble(ANILIDE, fix["linker"], VHL_LIGAND)
+    mol = Chem.MolFromSmiles(product)
+    for ligand in (ANILIDE, VHL_LIGAND):
+        q = Chem.MolFromSmiles(ligand.replace("[*:1]", "[H]").replace("[*:2]", "[H]"))
+        q = Chem.RemoveHs(q)
+        assert mol.HasSubstructMatch(q), "a published ligand was altered by the repair"
+
+
+def test_repair_declines_when_nothing_is_wrong():
+    good = "O=C(C[*:1])NCC[*:2]"
+    assert attachment_ok(ANILIDE, good, VHL_LIGAND)
+    assert repair_attachment(ANILIDE, good, VHL_LIGAND) is None
+
+
+def test_repair_is_refused_when_it_would_break_the_ring():
+    """Mutating the nitrogen out of a pyrrole leaves a ring that cannot exist.
+
+    The saturated control matters: it shows the None above is the guard firing,
+    not the input failing to parse.
+    """
+    from lasprotacs.rules import _mutate_attachment_to_carbon as mutate
+
+    assert Chem.MolFromSmiles("c1ccn([*:2])c1") is not None
+    assert mutate("c1ccn([*:2])c1", 2) is None
+    assert mutate("C1CCN([*:2])CC1", 2) == ("C1CCC([*:2])CC1", "N→C")

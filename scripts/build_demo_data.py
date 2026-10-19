@@ -27,7 +27,9 @@ from rdkit import Chem, RDLogger  # noqa: E402
 RDLogger.DisableLog("rdApp.*")
 
 from lasprotacs.assemble import assemble  # noqa: E402
-from lasprotacs.rules import attachment_ok, attachment_reason, new_alerts  # noqa: E402
+from lasprotacs.rules import (  # noqa: E402
+    attachment_ok, attachment_reason, new_alerts, repair_attachment,
+)  # noqa: E402
 from lasprotacs.score import developability, flags, properties  # noqa: E402
 
 N_WARHEADS, N_LINKERS, N_E3 = 14, 22, 8
@@ -85,6 +87,9 @@ def linker_name(smiles: str) -> tuple[str, str]:
     if n_o >= 2:
         tag = "PEG-amide" if amide else "PEG"
         return f"PEG{n_o}{', amide' if amide else ''} ({heavy} atoms)", tag
+    if n_o == 1:
+        # One ether oxygen is not a PEG and is certainly not an alkyl chain.
+        return f"ether{', amide' if amide else ''} ({heavy} atoms)", "ether"
     if amide:
         return f"alkyl amide, {heavy} atoms", "alkyl-amide"
     return f"alkyl, {heavy} atoms", "alkyl"
@@ -126,15 +131,34 @@ def main() -> None:
 
     raw = len(warheads) * len(linkers) * len(e3s)
     combos: dict[str, dict] = {}
-    rejects: dict[str, str] = {}
-    n_attach = n_built = n_clean = 0
+    rejects: dict[str, dict] = {}
+    n_attach = n_built = n_clean = n_repaired = 0
     for (wi, w), (li, l), (ei, e) in product(
         enumerate(warheads), enumerate(linkers), enumerate(e3s)
     ):
         if not attachment_ok(w["smiles"], l["smiles"], e["smiles"]):
-            rejects[f"{wi}-{li}-{ei}"] = attachment_reason(
-                w["smiles"], l["smiles"], e["smiles"]
-            )
+            entry = {
+                "reason": attachment_reason(w["smiles"], l["smiles"], e["smiles"])
+            }
+            # A refused join is usually one atom away from a legal one. Work
+            # out that atom now so the demo can show the fix, not just the
+            # complaint.
+            fix = repair_attachment(w["smiles"], l["smiles"], e["smiles"])
+            if fix:
+                smi = assemble(w["smiles"], fix["linker"], e["smiles"])
+                props = properties(smi) if smi else None
+                if props is not None:
+                    n_repaired += 1
+                    entry["fix"] = {
+                        "linker": fix["linker"], "changed": fix["changed"],
+                        "smiles": smi, "mw": props.mw, "clogp": props.clogp,
+                        "tpsa": props.tpsa, "hbd": props.hbd, "rotb": props.rotb,
+                        "dev": developability(props), "flags": flags(props),
+                        "alerts": new_alerts(
+                            smi, [w["smiles"], fix["linker"], e["smiles"]]
+                        ),
+                    }
+            rejects[f"{wi}-{li}-{ei}"] = entry
             continue
         n_attach += 1
         smi = assemble(w["smiles"], l["smiles"], e["smiles"])
@@ -155,6 +179,8 @@ def main() -> None:
 
     print(f"  raw {raw} -> attachment {n_attach} -> assembled {n_built} "
           f"-> no new alerts {n_clean}")
+    print(f"  refused joins: {len(rejects)}, of which {n_repaired} are one "
+          f"atom from a legal design")
 
     funnel_path = ROOT / "data" / "funnel.json"
     full = json.loads(funnel_path.read_text()) if funnel_path.exists() else {}
